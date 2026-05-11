@@ -1,8 +1,8 @@
 # QMark
 
-A fast, beautiful Markdown editor for Windows built with C# WPF and WebView2.
+A fast, beautiful, and completely free Markdown editor for Windows.
 
-一款基于 C# WPF 和 WebView2 打造的快速、美观的 Windows Markdown 编辑器。
+一款快速、美观、完全免费的 Windows Markdown 编辑器。
 
 [English](#english) | [中文](#中文)
 
@@ -10,20 +10,29 @@ A fast, beautiful Markdown editor for Windows built with C# WPF and WebView2.
 
 ## English
 
-### Features
+### Why QMark?
 
-- **Real-time Preview** — Instant Markdown rendering powered by WebView2
-- **Split View** — Side-by-side editor and preview, or full-source / full-preview modes
-- **Three Themes** — Light, Dark, and Sepia with smooth transitions
-- **File Tree** — Built-in sidebar with file explorer and auto-generated outline (table of contents)
-- **Window Resize** — Drag any edge or corner to freely resize the window
-- **Paste as Markdown** — Paste content from web pages (e.g. ChatGPT) and retain Markdown formatting
-- **File Association** — Open `.md` files directly with QMark
-- **Recently Opened** — Quick access to recent files on startup
+Most Markdown editors are either bloated IDEs, subscription-based web apps, or too simplistic to be useful. QMark sits in the sweet spot: **powerful enough for daily work, lightweight enough to launch instantly, and 100% free with no ads or sign-ups.**
+
+### Highlights
+
+- **100% Free & Open** — No subscription, no ads, no login required. Just download and write.
+- **Real-time Live Preview** — See your Markdown rendered instantly as you type, powered by Microsoft WebView2.
+- **Click-to-Edit from Preview** — Click anywhere in the preview panel to jump straight to the corresponding source line. No more hunting through raw text.
+- **Smart Paste from the Web** — Copy content from ChatGPT, documentation sites, or any web page and paste it directly as clean Markdown. Tables, lists, code blocks, and formatting are preserved automatically.
+- **Native Borderless Window** — A sleek, modern frameless design where you can drag **any edge or corner** to resize freely—no chunky borders needed.
+- **Bidirectional Scroll Sync** — Scroll the editor and the preview follows; scroll the preview and the editor follows. Always stay in context.
+- **Auto-generated Document Outline** — One-click sidebar shows a live table of contents extracted from your headings. Jump to any section instantly.
+- **Built-in File Tree** — Browse your project files right inside the editor. Switch between "Files" and "Outline" tabs on the fly.
+- **Floating Sidebar Button** — A draggable, auto-hiding sidebar toggle that stays out of your way until you need it.
+- **Three Beautiful Themes** — Light, Dark, and warm Sepia. Themes apply to both editor and preview with smooth transitions.
+- **Full Markdown Extensions** — Tables, task lists (`- [ ]`), auto-links, emphasis extras, and more via the Markdig engine.
+- **File Association** — Double-click any `.md` file to open it directly in QMark.
+- **Recent Files** — Pick up right where you left off with quick access to recently opened documents.
+- **Keyboard Shortcuts** — `Ctrl+N` New, `Ctrl+O` Open, `Ctrl+S` Save, `Ctrl+Shift+S` Save As, `Ctrl+Z` Undo.
+- **Back-to-Top Button** — Long document? One click in the preview sends you straight back to the top.
 
 ### Prerequisites
-
-Before building, make sure the following dependencies are installed on your Windows machine.
 
 | Dependency | How to Check | Download Link |
 |------------|-------------|---------------|
@@ -31,7 +40,7 @@ Before building, make sure the following dependencies are installed on your Wind
 | **.NET 10 SDK** | `dotnet --version` (should print `10.x.x`) | [dotnet.microsoft.com](https://dotnet.microsoft.com/download) |
 | **WebView2 Runtime** | Pre-installed on Windows 11; check "Apps > Installed apps" for "Microsoft Edge WebView2 Runtime" | [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) |
 
-> **Note:** You do **not** need Visual Studio. The project can be built entirely with the `dotnet` CLI that comes with the .NET SDK.
+> **Note:** Visual Studio is **not** required. The project builds entirely with the `dotnet` CLI that comes with the .NET SDK.
 
 ### Quick Start
 
@@ -40,7 +49,7 @@ Before building, make sure the following dependencies are installed on your Wind
 git clone https://github.com/1998moye/QMark.git
 cd QMark
 
-# 2. Restore NuGet dependencies (Markdig, WebView2, etc.)
+# 2. Restore NuGet dependencies
 dotnet restore
 
 # 3. Build Release version
@@ -50,7 +59,7 @@ dotnet build -c Release
 dotnet run
 ```
 
-After a successful build, the executable is located at:
+After a successful build, the executable is at:
 
 ```
 bin/Release/net10.0-windows/MarkdownEditor.exe
@@ -60,7 +69,7 @@ bin/Release/net10.0-windows/MarkdownEditor.exe
 
 - **Framework**: C# / WPF (.NET 10)
 - **Preview Engine**: Microsoft WebView2
-- **Markdown Parsing**: Markdig
+- **Markdown Parsing**: Markdig (with advanced extensions)
 - **Build Tool**: .NET SDK CLI (`dotnet`)
 
 ### File Association (Optional)
@@ -75,20 +84,29 @@ To register `.md` file association so you can double-click Markdown files to ope
 
 ## 中文
 
-### 功能特性
+### 为什么选择 QMark？
 
-- **实时预览** — 基于 WebView2 的即时 Markdown 渲染
-- **分栏模式** — 源码/预览并排显示，也支持纯源码或纯预览模式
-- **三套主题** — 浅色、深色、护眼 Sepia 三种主题，切换流畅
-- **文件树与大纲** — 内置侧边栏，包含文件浏览和自动生成的大纲目录
-- **自由调整窗口大小** — 拖拽任意边缘或四角自由缩放窗口
-- **粘贴保留 Markdown 格式** — 从网页（如 ChatGPT）复制内容粘贴时保留 Markdown 格式
-- **文件关联** — 双击 `.md` 文件直接用 QMark 打开
-- **最近文件** — 启动时快速访问最近打开的文件
+市面上的 Markdown 编辑器要么笨重如 IDE，要么需要订阅登录，要么功能过于简陋。QMark 恰到好处：**日常写作足够强大，启动轻快如飞，并且完全免费，无任何广告或强制登录。**
+
+### 亮点特性
+
+- **完全免费，开箱即用** — 无需订阅、无广告、无需注册账号，下载即用。
+- **实时预览渲染** — 基于 Microsoft WebView2，输入的同时即时看到 Markdown 渲染效果。
+- **点击预览即编辑** — 在预览区任意位置点击，自动跳转到对应的源码行，告别在 raw 文本中翻找。
+- **智能网页粘贴** — 从 ChatGPT、文档站点或任意网页复制内容，直接粘贴为干净的 Markdown。表格、列表、代码块和格式自动保留。
+- **原生无边框窗口** —  sleek 的现代无框设计，拖拽**任意边缘或四角**即可自由调整窗口大小，无需粗边框。
+- **双向滚动同步** — 滚动编辑器，预览跟随；滚动预览，编辑器跟随。始终保持在同一上下文。
+- **自动生成文档大纲** — 一键展开侧边栏，实时提取标题生成目录，任意章节瞬间跳转。
+- **内置文件树** — 在编辑器内直接浏览项目文件，"文件"与"大纲"标签随时切换。
+- **浮动侧边栏按钮** — 可拖拽、自动隐藏的侧边栏开关，不干扰写作，需要时随手唤出。
+- **三套精美主题** — 浅色、深色、暖色 Sepia。主题同时作用于编辑区和预览区，切换流畅自然。
+- **完整 Markdown 扩展语法** — 表格、任务列表（`- [ ]`）、自动链接、强调扩展等，由 Markdig 引擎完整支持。
+- **文件关联** — 双击任意 `.md` 文件，直接用 QMark 打开。
+- **最近文件** — 启动时快速访问最近打开的文档，从上次离开的地方继续。
+- **快捷键支持** — `Ctrl+N` 新建、`Ctrl+O` 打开、`Ctrl+S` 保存、`Ctrl+Shift+S` 另存为、`Ctrl+Z` 撤销。
+- **回到顶部** — 长文档预览一键回顶，告别疯狂滚轮。
 
 ### 前置依赖
-
-编译前请确保 Windows 电脑上已安装以下依赖。
 
 | 依赖项 | 检查方式 | 下载地址 |
 |--------|---------|---------|
@@ -105,7 +123,7 @@ To register `.md` file association so you can double-click Markdown files to ope
 git clone https://github.com/1998moye/QMark.git
 cd QMark
 
-# 2. 还原 NuGet 依赖（Markdig、WebView2 等）
+# 2. 还原 NuGet 依赖
 dotnet restore
 
 # 3. 编译 Release 版本
@@ -125,7 +143,7 @@ bin/Release/net10.0-windows/MarkdownEditor.exe
 
 - **框架**: C# / WPF (.NET 10)
 - **预览引擎**: Microsoft WebView2
-- **Markdown 解析**: Markdig
+- **Markdown 解析**: Markdig（含高级扩展）
 - **构建工具**: .NET SDK CLI (`dotnet`)
 
 ### 文件关联（可选）
