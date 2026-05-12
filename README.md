@@ -32,6 +32,12 @@ Most Markdown editors are either bloated IDEs, subscription-based web apps, or t
 - **Keyboard Shortcuts** — `Ctrl+N` New, `Ctrl+O` Open, `Ctrl+S` Save, `Ctrl+Shift+S` Save As, `Ctrl+Z` Undo.
 - **Back-to-Top Button** — Long document? One click in the preview sends you straight back to the top.
 
+### Screenshots
+
+| Light Theme | Dark Theme |
+|------------|------------|
+| ![Light Theme](img/001.png) | ![Dark Theme](img/002.png) |
+
 ### Prerequisites
 
 | Dependency | How to Check | Download Link |
@@ -53,16 +59,16 @@ cd QMark
 dotnet restore
 
 # 3. Build Release version
-dotnet build -c Release
+dotnet build src/MarkdownEditor.csproj -c Release
 
 # 4. Run
-dotnet run
+dotnet run --project src/MarkdownEditor.csproj
 ```
 
 After a successful build, the executable is at:
 
 ```
-bin/Release/net10.0-windows/MarkdownEditor.exe
+src/bin/Release/net10.0-windows/MarkdownEditor.exe
 ```
 
 ### Tech Stack
@@ -94,7 +100,7 @@ To register `.md` file association so you can double-click Markdown files to ope
 - **实时预览渲染** — 基于 Microsoft WebView2，输入的同时即时看到 Markdown 渲染效果。
 - **点击预览即编辑** — 在预览区任意位置点击，自动跳转到对应的源码行，告别在 raw 文本中翻找。
 - **智能网页粘贴** — 从 ChatGPT、文档站点或任意网页复制内容，直接粘贴为干净的 Markdown。表格、列表、代码块和格式自动保留。
-- **原生无边框窗口** —  sleek 的现代无框设计，拖拽**任意边缘或四角**即可自由调整窗口大小，无需粗边框。
+- **原生无边框窗口** — sleek 的现代无框设计，拖拽**任意边缘或四角**即可自由调整窗口大小，无需粗边框。
 - **双向滚动同步** — 滚动编辑器，预览跟随；滚动预览，编辑器跟随。始终保持在同一上下文。
 - **自动生成文档大纲** — 一键展开侧边栏，实时提取标题生成目录，任意章节瞬间跳转。
 - **内置文件树** — 在编辑器内直接浏览项目文件，"文件"与"大纲"标签随时切换。
@@ -105,6 +111,12 @@ To register `.md` file association so you can double-click Markdown files to ope
 - **最近文件** — 启动时快速访问最近打开的文档，从上次离开的地方继续。
 - **快捷键支持** — `Ctrl+N` 新建、`Ctrl+O` 打开、`Ctrl+S` 保存、`Ctrl+Shift+S` 另存为、`Ctrl+Z` 撤销。
 - **回到顶部** — 长文档预览一键回顶，告别疯狂滚轮。
+
+### 截图
+
+| 浅色主题 | 深色主题 |
+|----------|----------|
+| ![浅色主题](img/001.png) | ![深色主题](img/002.png) |
 
 ### 前置依赖
 
@@ -127,16 +139,16 @@ cd QMark
 dotnet restore
 
 # 3. 编译 Release 版本
-dotnet build -c Release
+dotnet build src/MarkdownEditor.csproj -c Release
 
 # 4. 运行
-dotnet run
+dotnet run --project src/MarkdownEditor.csproj
 ```
 
 编译成功后，可执行文件位于：
 
 ```
-bin/Release/net10.0-windows/MarkdownEditor.exe
+src/bin/Release/net10.0-windows/MarkdownEditor.exe
 ```
 
 ### 技术栈
