@@ -13,6 +13,19 @@ using System.Windows.Media;
 
 namespace MarkdownEditor;
 
+public class TagToVisibilityConverter : System.Windows.Data.IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+    {
+        // Tag 以 "file:" 开头的是文件节点，隐藏展开符
+        var tag = value as string;
+        return tag != null && tag.StartsWith("file:") ? System.Windows.Visibility.Collapsed : System.Windows.Visibility.Visible;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+        => throw new NotImplementedException();
+}
+
 public partial class MainWindow : Window
 {
     public static RoutedCommand BoldCommand = new();
@@ -40,6 +53,8 @@ public partial class MainWindow : Window
     private double _btnOffX, _btnOffY;
     private double _dragCheckX, _dragCheckY;
     private string _sidebarTab = "outline"; // "outline" or "files"
+    private string? _fileTreeRootPath;
+    private string? _fileTreeOriginalPath; // 当前文件所在目录，基准路径
 
     // Floating overlay window (transparent owned Window on top of WebView2)
     private Window? _floatOverlayWin;
@@ -339,6 +354,24 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+
+        // Click on empty area in file tree to cancel active inline inputs
+        FileTreeView.PreviewMouseDown += (_, e) =>
+        {
+            if (e.Source is TreeViewItem || FindVisualParent<TreeViewItem>(e.OriginalSource as DependencyObject) != null)
+                return;
+            // Defer to avoid modifying Items during tunnel event propagation
+            Dispatcher.BeginInvoke(CancelActiveInlineInputs, System.Windows.Threading.DispatcherPriority.Input);
+        };
+
+        // Right-click on empty area in file tree: show new-file/new-dir menu
+        FileTreeView.PreviewMouseRightButtonDown += (_, e) =>
+        {
+            if (e.Source is TreeViewItem || FindVisualParent<TreeViewItem>(e.OriginalSource as DependencyObject) != null)
+                return;
+            e.Handled = true;
+            ShowEmptyAreaContextMenu();
+        };
 
         // Load persisted settings
         var saved = LoadSettings();
@@ -2225,26 +2258,17 @@ public partial class MainWindow : Window
                     + $"if(!e){{setTimeout(function(){{window.__progScroll=false;}},800);return;}}"
                     + $"var li={heading.LineIndex};"
                     + $"var text=e.value;"
-                    + $"var lineStart=0;"
-                    + $"for(var i=0;i<li;i++){{"
-                    + $"var nl=text.indexOf('\\n',lineStart);"
-                    + $"if(nl<0){{lineStart=text.length;break;}}"
-                    + $"lineStart=nl+1;"
-                    + $"}}"
-                    + $"var totalLines=text.split('\\n').length||1;"
-                    + $"var maxScroll=Math.max(0,e.scrollHeight-e.clientHeight);"
-                    + $"var target=Math.max(0,(li/totalLines)*maxScroll-e.clientHeight*0.05);"
+                    // 用 mirror div 精确测量目标行起始位置的像素高度（考虑自动换行）
+                    + $"var cs=getComputedStyle(e);"
+                    + $"var m=document.getElementById('_m')||document.body.appendChild(Object.assign(document.createElement('div'),{{id:'_m',style:'position:absolute;left:-9999;top:-9999;width:'+e.clientWidth+'px;overflow:hidden;word-wrap:break-word;white-space:pre-wrap;font-family:'+cs.fontFamily+';font-size:'+cs.fontSize+';line-height:'+cs.lineHeight+';padding:'+cs.padding;'}}));"
+                    + $"m.style.width=e.clientWidth+'px';"
+                    + $"var lines=text.split('\\n');"
+                    + $"var target=0;"
+                    + $"for(var i=0;i<=li;i++){{m.textContent=(i>0?'\\n':'')+lines[i];target=m.offsetHeight;}}"
                     + $"e.scrollTop=target;"
-                    + $"try{{e.setSelectionRange(lineStart,lineStart);}}catch(_){{}}"
-                    + $"e.scrollTop=target;" // 立即再锁一次，覆盖 setSelectionRange 可能引起的 caret 滚动
-                    + $"var n=0;"
-                    + $"function lock(){{e.scrollTop=target;n++;if(n<10)requestAnimationFrame(lock);}}"
+                    + $"var n=0;function lock(){{e.scrollTop=target;n++;if(n<10)requestAnimationFrame(lock);}}"
                     + $"requestAnimationFrame(lock);"
-                    + $"setTimeout(function(){{e.scrollTop=target;}},80);"
-                    + $"setTimeout(function(){{e.scrollTop=target;}},200);"
-                    + $"setTimeout(function(){{e.scrollTop=target;window.__progScroll=false;}},800);"
-                    + $"var beforeSt=e.scrollTop;var canScroll=e.scrollHeight>e.clientHeight;"
-                    + $"try{{window.chrome.webview.postMessage('dbg:before='+beforeSt+',can='+canScroll+',sh='+e.scrollHeight+',ch='+e.clientHeight+',li='+li+',tl='+totalLines+',tgt='+target+',st='+e.scrollTop);}}catch(_){{}}"
+                    + $"setTimeout(function(){{e.scrollTop=target;e.scrollTop=target;window.__progScroll=false;}},800);"
                     + $"}})()");
             }
 
@@ -2305,20 +2329,46 @@ public partial class MainWindow : Window
     {
         FileTreeView.Items.Clear();
         FilesDirText.Text = "";
-        var dir = !string.IsNullOrEmpty(_currentFilePath)
-            ? System.IO.Path.GetDirectoryName(_currentFilePath)
+        FileTreeBackButton.Visibility = Visibility.Collapsed;
+        var filePath = _currentFilePath;
+        var dir = !string.IsNullOrEmpty(filePath)
+            ? System.IO.Path.GetDirectoryName(filePath)
             : null;
 
         if (dir == null || !Directory.Exists(dir))
         {
             FileTreeView.Items.Add(new TreeViewItem { Header = "请先打开一个文件", IsEnabled = false });
+            FileTreeUpButton.IsEnabled = false;
             return;
         }
 
-        FilesDirText.Text = dir;
-        var root = CreateDirNode(new DirectoryInfo(dir));
+        // 保存当前文件所在目录作为基准路径
+        _fileTreeOriginalPath = dir;
+
+        // 根目录：已导航过则用保存的路径，否则用当前文件所在目录
+        var rootPath = !string.IsNullOrEmpty(_fileTreeRootPath) && Directory.Exists(_fileTreeRootPath)
+            ? _fileTreeRootPath
+            : dir;
+        FilesDirText.Text = rootPath;
+
+        // "上一级"按钮：当前根的父目录存在时启用
+        FileTreeUpButton.IsEnabled = Directory.GetParent(rootPath) != null;
+
+        // "回到原目录"按钮：当前根不是文件目录时显示
+        FileTreeBackButton.Visibility = !PathsEqual(rootPath, dir) ? Visibility.Visible : Visibility.Collapsed;
+
+        var root = CreateDirNode(new DirectoryInfo(rootPath));
+        root.Header = CreateTreeNodeHeader(
+            rootPath,
+            GetDisplayNameForPath(rootPath),
+            isDirectory: true,
+            isCurrentFile: false,
+            rootPath);
         FileTreeView.Items.Add(root);
-        root.IsExpanded = true;
+        ExpandFileTreePath(root, dir, filePath);
+
+        // 当前根不是文件所在目录时，显示"回到原目录"按钮
+        FileTreeBackButton.Visibility = !PathsEqual(rootPath, dir) ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void RefreshSidebarContentForCurrentFile()
@@ -2331,19 +2381,24 @@ public partial class MainWindow : Window
 
     private TreeViewItem CreateDirNode(DirectoryInfo dirInfo)
     {
-        var textColor = ParseColor(_currentColors?.Text, Color.FromRgb(0x33, 0x33, 0x33));
+        var dirLabel = string.IsNullOrWhiteSpace(dirInfo.Name) ? dirInfo.FullName : dirInfo.Name;
         var item = new TreeViewItem
         {
-            Header = new TextBlock { Text = "📁 " + dirInfo.Name, FontSize = 12,
-                Foreground = new SolidColorBrush(textColor) },
+            Header = CreateTreeNodeHeader(
+                dirInfo.FullName,
+                dirLabel,
+                isDirectory: true,
+                isCurrentFile: false,
+                dirInfo.FullName),
             Tag = dirInfo.FullName
         };
         item.Items.Add("__loading__");
         item.Expanded += DirNode_Expanded;
 
         var ctx = new System.Windows.Controls.ContextMenu();
-        var nf = new System.Windows.Controls.MenuItem { Header = "📄 新建文件" };
-        var nd = new System.Windows.Controls.MenuItem { Header = "📁 新建目录" };
+        var nf = new System.Windows.Controls.MenuItem { Header = "\U0001f4c4 新建文件" };
+        var nd = new System.Windows.Controls.MenuItem { Header = "\U0001f4c1 新建目录" };
+        var dl = new System.Windows.Controls.MenuItem { Header = "\U0001f5d1 删除目录" };
         var dp = dirInfo.FullName;
         nf.Click += (_, _) => {
             // Use Dispatcher to ensure ContextMenu has closed before expanding
@@ -2358,15 +2413,51 @@ public partial class MainWindow : Window
                 InlineCreateDir(dp, item);
             }, System.Windows.Threading.DispatcherPriority.Input);
         };
-        ctx.Items.Add(nf); ctx.Items.Add(nd);
+        dl.Click += (_, _) => DeleteDirectory(dp);
+        ctx.Items.Add(nf);
+        ctx.Items.Add(nd);
+        ctx.Items.Add(new System.Windows.Controls.Separator());
+        ctx.Items.Add(dl);
         item.ContextMenu = ctx;
         return item;
     }
-
-    private void DirNode_Expanded(object? sender, System.Windows.RoutedEventArgs? e)
+    private void ExpandFileTreePath(TreeViewItem root, string targetDirPath, string? filePath)
     {
-        if (sender is not TreeViewItem item || item.Tag is not string dirPath) return;
-        // 防止重复加载：只有占位符时才真正加载（避免每次展开都重复添加节点）
+        EnsureDirNodeLoaded(root);
+        root.IsExpanded = true;
+
+        var currentPath = root.Tag as string;
+        if (string.IsNullOrEmpty(currentPath)) return;
+
+        while (!PathsEqual(currentPath, targetDirPath))
+        {
+            var nextChild = root.Items
+                .OfType<TreeViewItem>()
+                .FirstOrDefault(child =>
+                    child.Tag is string childPath &&
+                    IsDirectParentOf(currentPath, childPath) &&
+                    IsPathWithin(targetDirPath, childPath));
+            if (nextChild == null) break;
+
+            EnsureDirNodeLoaded(nextChild);
+            nextChild.IsExpanded = true;
+            root = nextChild;
+            currentPath = nextChild.Tag as string;
+            if (string.IsNullOrEmpty(currentPath)) break;
+        }
+
+        if (filePath == null) return;
+
+        var currentFileNode = root.Items
+            .OfType<TreeViewItem>()
+            .FirstOrDefault(child => child.Tag is string childPath && PathsEqual(childPath, filePath));
+        if (currentFileNode != null)
+            currentFileNode.IsSelected = true;
+    }
+
+    private void EnsureDirNodeLoaded(TreeViewItem item)
+    {
+        if (item.Tag is not string dirPath) return;
         if (item.Items.Count == 1 && item.Items[0] is string)
         {
             item.Items.Clear();
@@ -2381,18 +2472,98 @@ public partial class MainWindow : Window
         }
     }
 
+    private static bool PathsEqual(string? left, string? right)
+        => string.Equals(
+            Path.GetFullPath(left ?? string.Empty).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            Path.GetFullPath(right ?? string.Empty).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsPathWithin(string path, string candidateAncestor)
+    {
+        var normalizedPath = Path.GetFullPath(path)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var normalizedAncestor = Path.GetFullPath(candidateAncestor)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return normalizedPath.Equals(normalizedAncestor, StringComparison.OrdinalIgnoreCase)
+            || normalizedPath.StartsWith(normalizedAncestor + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsDirectParentOf(string parentPath, string childPath)
+    {
+        var childParent = Path.GetDirectoryName(
+            Path.GetFullPath(childPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        return PathsEqual(parentPath, childParent);
+    }
+
+    private string ResolveFileTreeRootPath(string currentDirPath)
+    {
+        var defaultRootPath = Directory.GetParent(currentDirPath)?.FullName ?? currentDirPath;
+        if (string.IsNullOrEmpty(_fileTreeRootPath)
+            || !Directory.Exists(_fileTreeRootPath)
+            || !IsPathWithin(currentDirPath, _fileTreeRootPath))
+        {
+            _fileTreeRootPath = defaultRootPath;
+        }
+
+        return _fileTreeRootPath;
+    }
+
+    private static bool CanNavigateFileTreeUp(string rootPath)
+    {
+        var parentPath = Directory.GetParent(rootPath)?.FullName;
+        return !string.IsNullOrEmpty(parentPath)
+            && Directory.Exists(parentPath)
+            && !PathsEqual(parentPath, rootPath);
+    }
+
+    private void NavigateFileTreeUp(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrEmpty(_currentFilePath))
+            return;
+
+        var dir = Path.GetDirectoryName(_currentFilePath);
+        if (string.IsNullOrEmpty(dir))
+            return;
+
+        var currentRoot = !string.IsNullOrEmpty(_fileTreeRootPath) && Directory.Exists(_fileTreeRootPath)
+            ? _fileTreeRootPath
+            : dir;
+        var parentPath = Directory.GetParent(currentRoot)?.FullName;
+        if (string.IsNullOrEmpty(parentPath) || !Directory.Exists(parentPath))
+            return;
+
+        _fileTreeRootPath = parentPath;
+        PopulateFileTree();
+    }
+
+    private void NavigateFileTreeBack(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrEmpty(_fileTreeOriginalPath))
+            return;
+
+        _fileTreeRootPath = _fileTreeOriginalPath;
+        PopulateFileTree();
+    }
+
+    private void DirNode_Expanded(object? sender, System.Windows.RoutedEventArgs? e)
+    {
+        if (sender is not TreeViewItem item || item.Tag is not string) return;
+        if (item.Items.Count == 1 && item.Items[0] is string)
+            EnsureDirNodeLoaded(item);
+    }
     private TreeViewItem CreateFileNode(FileInfo fileInfo)
     {
         var fn = fileInfo.Name;
         var ic = fileInfo.FullName == _currentFilePath;
-        var textColor = ParseColor(_currentColors?.Text, Color.FromRgb(0x33, 0x33, 0x33));
-        var linkColor = ParseColor(_currentColors?.Link, Color.FromRgb(0x25, 0x63, 0xeb));
         var item = new TreeViewItem
         {
-            Header = new TextBlock { Text = "📄 " + fn, FontSize = 12,
-                FontWeight = ic ? FontWeights.SemiBold : FontWeights.Normal,
-                Foreground = ic ? new SolidColorBrush(linkColor) : new SolidColorBrush(textColor) },
-            Tag = fileInfo.FullName
+            Header = CreateTreeNodeHeader(
+                fileInfo.FullName,
+                fn,
+                isDirectory: false,
+                isCurrentFile: ic,
+                fileInfo.FullName),
+            Tag = "file:" + fileInfo.FullName
         };
         item.Selected += (_, _) => {
             if (fileInfo.FullName != _currentFilePath) {
@@ -2402,9 +2573,9 @@ public partial class MainWindow : Window
         };
         var ctx = new System.Windows.Controls.ContextMenu();
         var fp = fileInfo.FullName;
-        var rn = new System.Windows.Controls.MenuItem { Header = "✏ 重命名" };
-        var cp = new System.Windows.Controls.MenuItem { Header = "📋 复制路径" };
-        var dl = new System.Windows.Controls.MenuItem { Header = "🗑 删除" };
+        var rn = new System.Windows.Controls.MenuItem { Header = "\u270f 重命名" };
+        var cp = new System.Windows.Controls.MenuItem { Header = "\U0001f4cb 复制路径" };
+        var dl = new System.Windows.Controls.MenuItem { Header = "\U0001f5d1 删除" };
         rn.Click += (_, _) => InlineRename(fp, item);
         cp.Click += (_, _) => { try { System.Windows.Clipboard.SetText(fp); } catch { } };
         dl.Click += (_, _) => DeleteFile(fp);
@@ -2413,6 +2584,121 @@ public partial class MainWindow : Window
         ctx.Items.Add(dl);
         item.ContextMenu = ctx;
         return item;
+    }
+
+    private FrameworkElement CreateTreeNodeHeader(string stableKey, string label, bool isDirectory, bool isCurrentFile, string toolTip)
+    {
+        var textColor = ParseColor(_currentColors?.Text, Color.FromRgb(0x33, 0x33, 0x33));
+        var linkColor = ParseColor(_currentColors?.Link, Color.FromRgb(0x25, 0x63, 0xeb));
+        var foreground = isCurrentFile ? new SolidColorBrush(linkColor) : new SolidColorBrush(textColor);
+        var header = new Grid
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            ClipToBounds = true,
+            Tag = stableKey
+        };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var icon = new TextBlock
+        {
+            Text = isDirectory ? "\U0001f4c1" : "\U0001f4c4",
+            FontSize = 12,
+            Margin = new Thickness(0, 0, 6, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = foreground
+        };
+        Grid.SetColumn(icon, 0);
+
+        var text = new TextBlock
+        {
+            Text = label,
+            FontSize = 12,
+            FontWeight = isCurrentFile ? FontWeights.SemiBold : FontWeights.Normal,
+            Foreground = foreground,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextWrapping = TextWrapping.NoWrap,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            ToolTip = toolTip
+        };
+        Grid.SetColumn(text, 1);
+
+        header.Children.Add(icon);
+        header.Children.Add(text);
+        return header;
+    }
+
+    private static string GetDisplayNameForPath(string path)
+    {
+        var normalized = Path.GetFullPath(path)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var name = Path.GetFileName(normalized);
+        return string.IsNullOrWhiteSpace(name) ? normalized : name;
+    }
+
+    private void ClearCurrentDocumentAfterDeletion()
+    {
+        _editorText = "";
+        _currentFilePath = null;
+        _isDirty = false;
+        SaveLastFilePath(null);
+        UpdateTitle();
+        UpdateFileNameLabel();
+        UpdateStatusBar();
+        _ = EditorWebView?.CoreWebView2?.ExecuteScriptAsync(
+            "var e=document.getElementById('editor'); if(e) e.value='';");
+        UpdatePreview();
+    }
+
+    private void RemoveRecentFiles(Func<RecentFileEntry, bool> predicate)
+    {
+        var files = LoadRecentFiles();
+        if (files.RemoveAll(entry => predicate(entry)) <= 0)
+            return;
+
+        SaveRecentFiles(files);
+        RefreshRecentList();
+    }
+
+    private bool RemoveFileTreeNode(string targetTag)
+    {
+        return RemoveFileTreeNode(FileTreeView.Items, node =>
+        {
+            if (node.Tag is not string nodeTag)
+                return false;
+
+            return targetTag.StartsWith("file:", StringComparison.Ordinal)
+                ? string.Equals(nodeTag, targetTag, StringComparison.OrdinalIgnoreCase)
+                : PathsEqual(nodeTag, targetTag);
+        });
+    }
+
+    private static bool RemoveFileTreeNode(ItemCollection items, Func<TreeViewItem, bool> match)
+    {
+        foreach (var node in items.OfType<TreeViewItem>().ToList())
+        {
+            if (match(node))
+            {
+                items.Remove(node);
+                return true;
+            }
+
+            if (RemoveFileTreeNode(node.Items, match))
+                return true;
+        }
+
+        return false;
+    }
+
+    private void NormalizeFileTreeAfterDeletion(string emptyMessage)
+    {
+        if (FileTreeView.Items.Count > 0)
+            return;
+
+        FilesDirText.Text = "";
+        FileTreeUpButton.IsEnabled = false;
+        FileTreeBackButton.Visibility = Visibility.Collapsed;
+        FileTreeView.Items.Add(new TreeViewItem { Header = emptyMessage, IsEnabled = false });
     }
 
     private void InlineCreateItem(string dirPath, TreeViewItem parent, bool expand)
@@ -2544,19 +2830,210 @@ public partial class MainWindow : Window
         var isCurrentFile = _currentFilePath == filePath;
         try {
             File.Delete(filePath);
+            RemoveRecentFiles(entry => PathsEqual(entry.Path, filePath));
+            _ = RemoveFileTreeNode("file:" + filePath);
             if (isCurrentFile) {
-                _editorText = ""; _currentFilePath = null; _isDirty = false;
-                UpdateTitle(); UpdateFileNameLabel(); UpdateStatusBar();
-                _ = EditorWebView?.CoreWebView2?.ExecuteScriptAsync("document.getElementById('editor').value=''");
+                ClearCurrentDocumentAfterDeletion();
             }
-            // 刷新文件树：仅当在文件标签页时才刷新，否则下次进入文件标签页时自动刷新
-            if (_sidebarOpen && _sidebarTab == "files")
-            {
-                Dispatcher.InvokeAsync(() => {
-                    try { PopulateFileTree(); } catch { }
-                }, System.Windows.Threading.DispatcherPriority.Background);
-            }
+            NormalizeFileTreeAfterDeletion("当前目录已删除");
+            StatusText.Text = $"已删除: {name}";
         } catch (Exception ex) { ShowModernDialog("删除失败: " + ex.Message, "错误", isError: true); }
+    }
+
+    private void DeleteDirectory(string dirPath)
+    {
+        var name = GetDisplayNameForPath(dirPath);
+        var affectsCurrentFile = !string.IsNullOrEmpty(_currentFilePath) && IsPathWithin(_currentFilePath, dirPath);
+        try
+        {
+            Directory.Delete(dirPath, true);
+            RemoveRecentFiles(entry => IsPathWithin(entry.Path, dirPath));
+            _ = RemoveFileTreeNode(dirPath);
+            if (affectsCurrentFile)
+                ClearCurrentDocumentAfterDeletion();
+
+            NormalizeFileTreeAfterDeletion("当前目录已删除");
+            StatusText.Text = $"已删除目录: {name}";
+        }
+        catch (Exception ex)
+        {
+            ShowModernDialog("删除目录失败: " + ex.Message, "错误", isError: true);
+        }
+    }
+
+    /// <summary>Walk visual tree upward to find a parent of type T.</summary>
+    private static T? FindVisualParent<T>(DependencyObject? child) where T : DependencyObject
+    {
+        while (child != null)
+        {
+            if (child is T parent) return parent;
+            child = System.Windows.Media.VisualTreeHelper.GetParent(child);
+        }
+        return null;
+    }
+
+    /// <summary>Remove any active inline TextBox nodes that have empty content.</summary>
+    private void CancelActiveInlineInputs()
+    {
+        CancelInlineInputs(FileTreeView.Items);
+    }
+
+    private static void CancelInlineInputs(ItemCollection items)
+    {
+        var toRemove = new List<TreeViewItem>();
+        foreach (var item in items.OfType<TreeViewItem>())
+        {
+            if (item.Header is System.Windows.Controls.TextBox tb && string.IsNullOrEmpty(tb.Text.Trim()))
+            {
+                toRemove.Add(item);
+            }
+            else
+            {
+                CancelInlineInputs(item.Items);
+            }
+        }
+        foreach (var item in toRemove)
+            items.Remove(item);
+    }
+
+    /// <summary>
+    /// Determine the target directory for new-file/new-dir from empty area context menu.
+    /// Priority: current file's directory &gt; first expanded dir node &gt; null.
+    /// Returns (dirPath, treeViewItem) or (null, null) if none available.
+    /// </summary>
+    private (string? DirPath, TreeViewItem? Node) FindTargetDirForNewItem()
+    {
+        // Priority 1: current file's directory
+        if (!string.IsNullOrEmpty(_currentFilePath))
+        {
+            var dir = System.IO.Path.GetDirectoryName(_currentFilePath);
+            if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+            {
+                // Find the corresponding root node (or expanded child node matching the dir)
+                foreach (TreeViewItem root in FileTreeView.Items.OfType<TreeViewItem>())
+                {
+                    var found = FindDirNodeByPath(root, dir);
+                    if (found != null)
+                        return (dir, found);
+                }
+                // Directory exists but not visible in tree yet — return it without node ref
+                return (dir, null);
+            }
+        }
+
+        // Priority 2: first expanded directory node in the tree
+        foreach (TreeViewItem root in FileTreeView.Items.OfType<TreeViewItem>())
+        {
+            var found = FindFirstExpandedDirNode(root);
+            if (found != null && found.Tag is string dp)
+                return (dp, found);
+        }
+
+        return (null, null);
+    }
+
+    private static TreeViewItem? FindDirNodeByPath(TreeViewItem node, string targetDir)
+    {
+        if (node.Tag is string dp && PathsEqual(dp, targetDir))
+            return node;
+        foreach (TreeViewItem child in node.Items.OfType<TreeViewItem>())
+        {
+            var found = FindDirNodeByPath(child, targetDir);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private static TreeViewItem? FindFirstExpandedDirNode(TreeViewItem node)
+    {
+        if (node.IsExpanded && node.Tag is string dp && Directory.Exists(dp))
+            return node;
+        foreach (TreeViewItem child in node.Items.OfType<TreeViewItem>())
+        {
+            var found = FindFirstExpandedDirNode(child);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private void ShowEmptyAreaContextMenu()
+    {
+        var (dirPath, targetNode) = FindTargetDirForNewItem();
+
+        var menu = new System.Windows.Controls.ContextMenu();
+        var nf = new System.Windows.Controls.MenuItem { Header = "📄 新建文件" };
+        var nd = new System.Windows.Controls.MenuItem { Header = "📁 新建目录" };
+
+        if (string.IsNullOrEmpty(dirPath))
+        {
+            nf.IsEnabled = false;
+            nd.IsEnabled = false;
+            nf.ToolTip = "请先打开一个文件或展开一个目录";
+            nd.ToolTip = "请先打开一个文件或展开一个目录";
+        }
+        else
+        {
+            nf.Click += (_, _) =>
+            {
+                if (targetNode != null)
+                {
+                    Dispatcher.BeginInvoke(() =>
+                    {
+                        targetNode.IsExpanded = true;
+                        InlineCreateItem(dirPath, targetNode, false);
+                    }, System.Windows.Threading.DispatcherPriority.Input);
+                }
+                else if (!string.IsNullOrEmpty(dirPath))
+                {
+                    // Directory exists but not in tree — use file system path directly
+                    try
+                    {
+                        var name = ShowModernInputDialog("新建文件", "文件名（无需 .md 后缀）：");
+                        if (string.IsNullOrWhiteSpace(name)) return;
+                        var path = System.IO.Path.Combine(dirPath, name.EndsWith(".md") ? name : name + ".md");
+                        File.WriteAllText(path, $"# {System.IO.Path.GetFileNameWithoutExtension(path)}\n\n");
+                        OpenRecentFile(path);
+                        PopulateFileTree();
+                    }
+                    catch (Exception ex)
+                    {
+                        ShowModernDialog("创建失败: " + ex.Message, "错误", isError: true);
+                    }
+                }
+            };
+
+            nd.Click += (_, _) =>
+            {
+                if (targetNode != null)
+                {
+                    Dispatcher.BeginInvoke(() =>
+                    {
+                        targetNode.IsExpanded = true;
+                        InlineCreateDir(dirPath, targetNode);
+                    }, System.Windows.Threading.DispatcherPriority.Input);
+                }
+                else if (!string.IsNullOrEmpty(dirPath))
+                {
+                    try
+                    {
+                        var name = ShowModernInputDialog("新建目录", "目录名：");
+                        if (string.IsNullOrWhiteSpace(name)) return;
+                        Directory.CreateDirectory(System.IO.Path.Combine(dirPath, name));
+                        PopulateFileTree();
+                    }
+                    catch (Exception ex)
+                    {
+                        ShowModernDialog("创建失败: " + ex.Message, "错误", isError: true);
+                    }
+                }
+            };
+        }
+
+        menu.Items.Add(nf);
+        menu.Items.Add(nd);
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
+        menu.PlacementTarget = FileTreeView;
+        menu.IsOpen = true;
     }
 
     #endregion
@@ -2693,6 +3170,10 @@ public partial class MainWindow : Window
             this.Resources["TreeItemSelectedBg"] = new SolidColorBrush(hoverBg);
             this.Resources["TreeItemHoverBg"] = new SolidColorBrush(ParseColor(
                 colors?.AltRowBg, Color.FromRgb(0xf3, 0xf4, 0xf6)));
+
+            // Button text and hover colors
+            this.Resources["TextPrimaryBrush"] = new SolidColorBrush(textColor);
+            this.Resources["HoverBgBrush"] = new SolidColorBrush(hoverBg);
         }
         catch { }
     }
@@ -3589,6 +4070,175 @@ public partial class MainWindow : Window
                 dialog.Close();
             }
         };
+
+        dialog.ShowDialog();
+        return result;
+    }
+
+    /// <summary>Show a modal dialog with a single text input field. Returns the trimmed text, or null if cancelled.</summary>
+    private string? ShowModernInputDialog(string title, string prompt)
+    {
+        string? result = null;
+
+        var dialog = new Window
+        {
+            Width = 400,
+            Height = 200,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = this,
+            WindowStyle = WindowStyle.None,
+            AllowsTransparency = true,
+            Background = Brushes.Transparent,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+            Topmost = true
+        };
+
+        var root = new Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(0xf0, 0xf2, 0xf5)),
+            CornerRadius = new CornerRadius(10),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)),
+            BorderThickness = new Thickness(1)
+        };
+
+        var grid = new Grid();
+        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(36) });
+        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(48) });
+
+        // Title bar
+        var titleBar = new Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(0x1a, 0x1a, 0x2e)),
+            CornerRadius = new CornerRadius(10, 10, 0, 0)
+        };
+        var titleGrid = new Grid();
+        titleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        titleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        titleGrid.Margin = new Thickness(12, 0, 0, 0);
+
+        var titleText = new TextBlock
+        {
+            Text = title,
+            Foreground = Brushes.White,
+            FontSize = 12,
+            FontWeight = FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Grid.SetColumn(titleText, 0);
+
+        var closeBtn = new Button
+        {
+            Content = new TextBlock { Text = "✕", FontSize = 12, Foreground = Brushes.White },
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Width = 36,
+            Height = 36,
+            Cursor = Cursors.Hand
+        };
+        closeBtn.MouseEnter += (_, _) => closeBtn.Background = new SolidColorBrush(Color.FromRgb(0xe8, 0x11, 0x23));
+        closeBtn.MouseLeave += (_, _) => closeBtn.Background = Brushes.Transparent;
+        closeBtn.Click += (_, _) => { dialog.Close(); };
+        Grid.SetColumn(closeBtn, 1);
+
+        titleGrid.Children.Add(titleText);
+        titleGrid.Children.Add(closeBtn);
+        titleBar.Child = titleGrid;
+        Grid.SetRow(titleBar, 0);
+        grid.Children.Add(titleBar);
+
+        // Content with label and input
+        var contentPanel = new StackPanel
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(20, 10, 20, 10)
+        };
+        var promptText = new TextBlock
+        {
+            Text = prompt,
+            FontSize = 13,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x1a, 0x1a, 0x2e)),
+            Margin = new Thickness(0, 0, 0, 8)
+        };
+        var inputBox = new System.Windows.Controls.TextBox
+        {
+            FontSize = 13,
+            Padding = new Thickness(8, 5, 8, 5),
+            BorderThickness = new Thickness(1),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0xe5, 0xe7, 0xeb)),
+            Background = new SolidColorBrush(Color.FromRgb(0xf8, 0xf9, 0xfa)),
+            Foreground = new SolidColorBrush(Color.FromRgb(0x1a, 0x1a, 0x2e))
+        };
+        contentPanel.Children.Add(promptText);
+        contentPanel.Children.Add(inputBox);
+        var contentBorder = new Border { Child = contentPanel, Background = Brushes.White };
+        Grid.SetRow(contentBorder, 1);
+        grid.Children.Add(contentBorder);
+
+        // Buttons
+        var btnPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 0, 12, 0)
+        };
+        var btnBar = new Border
+        {
+            Child = btnPanel,
+            Background = new SolidColorBrush(Color.FromRgb(0xf8, 0xf9, 0xfa)),
+            CornerRadius = new CornerRadius(0, 0, 10, 10),
+            BorderThickness = new Thickness(0, 1, 0, 0),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0xe5, 0xe7, 0xeb))
+        };
+
+        var accentBrush = new SolidColorBrush(Color.FromRgb(0x25, 0x63, 0xeb));
+        var darkBrush = new SolidColorBrush(Color.FromRgb(0x1a, 0x1a, 0x2e));
+        var hoverBg = new SolidColorBrush(Color.FromRgb(0xe8, 0xec, 0xf4));
+
+        var okBtn = new Button
+        {
+            Content = new TextBlock { Text = "确定", FontSize = 12, Foreground = Brushes.White },
+            Background = accentBrush,
+            BorderThickness = new Thickness(0),
+            Height = 30,
+            MinWidth = 72,
+            Margin = new Thickness(0, 0, 8, 0),
+            Cursor = Cursors.Hand,
+            Padding = new Thickness(12, 0, 12, 0)
+        };
+        okBtn.Click += (_, _) => { result = inputBox.Text.Trim(); dialog.Close(); };
+
+        var cancelBtn = new Button
+        {
+            Content = new TextBlock { Text = "取消", FontSize = 12, Foreground = darkBrush },
+            Background = new SolidColorBrush(Color.FromRgb(0xf3, 0xf4, 0xf6)),
+            BorderThickness = new Thickness(0),
+            Height = 30,
+            MinWidth = 72,
+            Margin = new Thickness(0, 0, 8, 0),
+            Cursor = Cursors.Hand,
+            Padding = new Thickness(12, 0, 12, 0)
+        };
+        cancelBtn.MouseEnter += (_, _) => cancelBtn.Background = hoverBg;
+        cancelBtn.MouseLeave += (_, _) => cancelBtn.Background = new SolidColorBrush(Color.FromRgb(0xf3, 0xf4, 0xf6));
+        cancelBtn.Click += (_, _) => { dialog.Close(); };
+
+        btnPanel.Children.Add(okBtn);
+        btnPanel.Children.Add(cancelBtn);
+
+        Grid.SetRow(btnBar, 2);
+        grid.Children.Add(btnBar);
+        root.Child = grid;
+        dialog.Content = root;
+
+        dialog.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Escape) dialog.Close();
+            if (e.Key == Key.Enter) { result = inputBox.Text.Trim(); dialog.Close(); }
+        };
+
+        dialog.Loaded += (_, _) => inputBox.Focus();
 
         dialog.ShowDialog();
         return result;
