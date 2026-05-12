@@ -236,7 +236,7 @@ public partial class MainWindow : Window
         html { overflow-x: hidden; }
         body {
             font-family: -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
-            padding: 30px 60px; line-height: 1.7;
+            padding: 30px 120px; line-height: 1.7;
             color: {{c.Text}}; background: {{c.Bg}};
             max-width: 100%; margin: 0 auto;
             word-wrap: break-word; overflow-wrap: break-word;
