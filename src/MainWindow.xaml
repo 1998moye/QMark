@@ -902,18 +902,6 @@
                     <TextBlock Grid.Column="2" x:Name="WordCountText" Text="行 0 · 字 0 · 字符 0"
                                Foreground="{StaticResource TextSecondaryBrush}" FontSize="11"
                                VerticalAlignment="Center" />
-                    <!-- Resize grip -->
-                    <Thumb Grid.Column="3" x:Name="ResizeGripThumb"
-                           Width="16" Height="16"
-                           Cursor="SizeNWSE" DragDelta="ResizeGrip_DragDelta">
-                        <Thumb.Template>
-                            <ControlTemplate TargetType="Thumb">
-                                <Path Fill="{StaticResource TextSecondaryBrush}" Opacity="0.5"
-                                      Data="M 0 12 L 12 0 L 12 5 L 5 12 Z M 0 16 L 16 0 L 16 2 L 2 16 Z M 6 16 L 16 6 L 16 10 L 10 16 Z"
-                                      VerticalAlignment="Bottom" HorizontalAlignment="Right" />
-                            </ControlTemplate>
-                        </Thumb.Template>
-                    </Thumb>
                 </Grid>
             </Border>
 

@@ -236,9 +236,12 @@ public partial class MainWindow : Window
         html { overflow-x: hidden; }
         body {
             font-family: -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
-            padding: 30px 120px; line-height: 1.7;
+            width: 100%;
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 30px clamp(20px, 6vw, 120px);
+            line-height: 1.7;
             color: {{c.Text}}; background: {{c.Bg}};
-            max-width: 100%; margin: 0 auto;
             word-wrap: break-word; overflow-wrap: break-word;
             overflow-x: hidden;
         }
@@ -503,15 +506,13 @@ public partial class MainWindow : Window
                 html, body { height: 100%; overflow: hidden; }
                 body { background: {{bg}}; }
                 #editor {
-                    width: 100%; height: 100%; border: none; outline: none; resize: none;
+                    width: 100%; max-width: 980px; height: 100%; border: none; outline: none; resize: none;
                     overflow-y: auto;
-                    padding: 30px;
+                    margin: 0 auto;
+                    padding: 30px clamp(20px, 6vw, 120px);
                     font-family: 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
                     font-size: 14px; line-height: 1.7;
                     color: {{fg}}; background: {{bg}};
-                }
-                @media (min-width: 800px) {
-                    #editor { padding: 30px 180px 30px 120px; }
                 }
                 ::-webkit-scrollbar { width: 8px; }
                 ::-webkit-scrollbar-track { background: transparent; }
@@ -529,6 +530,93 @@ public partial class MainWindow : Window
                 });
                 window.setContent = function(text) { editor.value = text; };
                 window.getContent = function() { return editor.value; };
+                function getLineStart(text, lineIndex) {
+                    var start = 0;
+                    for (var i = 0; i < lineIndex; i++) {
+                        var nl = text.indexOf('\n', start);
+                        if (nl < 0) return text.length;
+                        start = nl + 1;
+                    }
+                    return start;
+                }
+                function ensureScrollMeasure() {
+                    var mirror = document.getElementById('__editor-scroll-mirror');
+                    if (mirror) return mirror;
+                    mirror = document.createElement('div');
+                    mirror.id = '__editor-scroll-mirror';
+                    mirror.setAttribute('aria-hidden', 'true');
+                    mirror.style.position = 'absolute';
+                    mirror.style.top = '0';
+                    mirror.style.left = '-100000px';
+                    mirror.style.visibility = 'hidden';
+                    mirror.style.pointerEvents = 'none';
+                    mirror.style.whiteSpace = 'pre-wrap';
+                    mirror.style.overflowWrap = 'break-word';
+                    mirror.style.wordWrap = 'break-word';
+                    mirror.style.overflow = 'hidden';
+                    document.body.appendChild(mirror);
+                    return mirror;
+                }
+                function measureLineScrollTop(lineIndex) {
+                    var text = editor.value || '';
+                    var lineStart = getLineStart(text, lineIndex);
+                    var mirror = ensureScrollMeasure();
+                    var cs = window.getComputedStyle(editor);
+                    mirror.style.boxSizing = cs.boxSizing;
+                    mirror.style.width = editor.clientWidth + 'px';
+                    mirror.style.padding = cs.padding;
+                    mirror.style.border = cs.border;
+                    mirror.style.fontFamily = cs.fontFamily;
+                    mirror.style.fontSize = cs.fontSize;
+                    mirror.style.fontWeight = cs.fontWeight;
+                    mirror.style.fontStyle = cs.fontStyle;
+                    mirror.style.lineHeight = cs.lineHeight;
+                    mirror.style.letterSpacing = cs.letterSpacing;
+                    mirror.style.textTransform = cs.textTransform;
+                    mirror.style.textIndent = cs.textIndent;
+                    mirror.style.wordSpacing = cs.wordSpacing;
+                    mirror.style.tabSize = cs.tabSize;
+                    mirror.textContent = text.substring(0, lineStart);
+                    var marker = document.createElement('span');
+                    marker.textContent = '\u200b';
+                    mirror.appendChild(marker);
+                    var maxScroll = Math.max(0, editor.scrollHeight - editor.clientHeight);
+                    var target = Math.max(0, Math.min(maxScroll, marker.offsetTop));
+                    mirror.textContent = '';
+                    return { lineStart: lineStart, target: target };
+                }
+                window.scrollEditorToLine = function(lineIndex) {
+                    if (!editor) return;
+                    var token = (window.__editorScrollToken || 0) + 1;
+                    window.__editorScrollToken = token;
+                    window.__progScroll = true;
+                    var data = measureLineScrollTop(lineIndex);
+                    var target = data.target;
+                    editor.scrollTop = target;
+                    try { editor.setSelectionRange(data.lineStart, data.lineStart); } catch (e) {}
+                    editor.scrollTop = target;
+                    var n = 0;
+                    function lock() {
+                        if (window.__editorScrollToken !== token) return;
+                        editor.scrollTop = target;
+                        n++;
+                        if (n < 10) requestAnimationFrame(lock);
+                    }
+                    requestAnimationFrame(lock);
+                    setTimeout(function() {
+                        if (window.__editorScrollToken !== token) return;
+                        editor.scrollTop = target;
+                    }, 80);
+                    setTimeout(function() {
+                        if (window.__editorScrollToken !== token) return;
+                        editor.scrollTop = target;
+                    }, 200);
+                    setTimeout(function() {
+                        if (window.__editorScrollToken !== token) return;
+                        editor.scrollTop = target;
+                        window.__progScroll = false;
+                    }, 800);
+                };
                 window.wrapSelection = function(before, after) {
                     var start = editor.selectionStart, end = editor.selectionEnd;
                     var selected = editor.value.substring(start, end);
@@ -1348,7 +1436,7 @@ public partial class MainWindow : Window
                             _ = PreviewWebView.CoreWebView2?.ExecuteScriptAsync(
                                 "window.__progScroll=true;window.scrollTo({top:0,behavior:'smooth'});setTimeout(function(){window.__progScroll=false;},600);");
                             _ = EditorWebView.CoreWebView2?.ExecuteScriptAsync(
-                                "window.__progScroll=true;var e=document.getElementById('editor');e.scrollTop=0;setTimeout(function(){window.__progScroll=false;},600);");
+                                "window.__editorScrollToken=(window.__editorScrollToken||0)+1;window.__progScroll=true;var e=document.getElementById('editor');if(e)e.scrollTop=0;setTimeout(function(){window.__progScroll=false;},600);");
                             await Task.Delay(500);
                         }
                         finally { _suppressScrollRef--; }
@@ -1370,6 +1458,12 @@ public partial class MainWindow : Window
                 {
                     // Preview scroll sync
                     if (double.TryParse(msg[3..], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var pctQueued))
+                    {
+                        _ = Dispatcher.BeginInvoke(() => QueuePreviewToEditorScrollSync(pctQueued));
+                        return;
+                    }
+                    if (double.TryParse(msg[3..], System.Globalization.NumberStyles.Float,
                         System.Globalization.CultureInfo.InvariantCulture, out var pct))
                         _ = Dispatcher.BeginInvoke(async () =>
                         {
@@ -1382,9 +1476,9 @@ public partial class MainWindow : Window
                             {
                                 // 同步设置 __progScroll 再执行滚动，防止滚动触发的新消息被发出去
                                 _ = EditorWebView.CoreWebView2?.ExecuteScriptAsync(
-                                    $"window.__progScroll=true;var e=document.getElementById('editor');e.scrollTop=(e.scrollHeight-e.clientHeight)*{pct.ToString("F4", System.Globalization.CultureInfo.InvariantCulture)};setTimeout(function(){{window.__progScroll=false;}},150);");
+                                    $"window.__progScroll=true;var e=document.getElementById('editor');e.scrollTop=(e.scrollHeight-e.clientHeight)*{pct.ToString("F4", System.Globalization.CultureInfo.InvariantCulture)};setTimeout(function(){{window.__progScroll=false;}},80);");
                                 // 延迟清除 suppress，确保对方的防抖 setTimeout 执行时仍被抑制
-                                await Task.Delay(200);
+                                await Task.Delay(100);
                             }
                             finally { _suppressScrollRef--; }
                         });
@@ -1398,12 +1492,13 @@ public partial class MainWindow : Window
                 });
                 document.addEventListener('scroll', function() {
                     if (window.__progScroll) return;
-                    clearTimeout(window._pst);
-                    window._pst = setTimeout(function() {
+                    if (window.__psRaf) return;
+                    window.__psRaf = requestAnimationFrame(function() {
+                        window.__psRaf = 0;
                         if (window.__progScroll) return;
                         var m = document.documentElement.scrollHeight - document.documentElement.clientHeight;
                         try { window.chrome.webview.postMessage('ps:' + (m > 0 ? document.documentElement.scrollTop / m : 0)); } catch(e) {}
-                    }, 50);
+                    });
                 });
             ");
 
@@ -1424,6 +1519,17 @@ public partial class MainWindow : Window
                 if (msg.StartsWith("s:"))
                 {
                     // Editor scroll sync
+                    // Only sync editor -> preview in split view.
+                    // In preview mode the editor is hidden and only receives programmatic scroll updates
+                    // from the preview side; letting those hidden updates write back causes visible jumps.
+                    if (_currentViewMode != ViewMode.Split)
+                        return;
+                    if (double.TryParse(msg[2..], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var pctQueued))
+                    {
+                        _ = Dispatcher.BeginInvoke(() => QueueEditorToPreviewScrollSync(pctQueued));
+                        return;
+                    }
                     if (double.TryParse(msg[2..], System.Globalization.NumberStyles.Float,
                         System.Globalization.CultureInfo.InvariantCulture, out var pct))
                         _ = Dispatcher.BeginInvoke(async () =>
@@ -1436,9 +1542,9 @@ public partial class MainWindow : Window
                             try
                             {
                                 _ = PreviewWebView.CoreWebView2?.ExecuteScriptAsync(
-                                    $"window.__progScroll=true;window.scrollTo(0,(document.documentElement.scrollHeight-document.documentElement.clientHeight)*{pct.ToString("F4", System.Globalization.CultureInfo.InvariantCulture)});setTimeout(function(){{window.__progScroll=false;}},150);");
+                                    $"window.__progScroll=true;window.scrollTo(0,(document.documentElement.scrollHeight-document.documentElement.clientHeight)*{pct.ToString("F4", System.Globalization.CultureInfo.InvariantCulture)});setTimeout(function(){{window.__progScroll=false;}},80);");
                                 // 延迟清除 suppress，确保对方的防抖 setTimeout 执行时仍被抑制
-                                await Task.Delay(200);
+                                await Task.Delay(100);
                             }
                             finally { _suppressScrollRef--; }
                         });
@@ -1493,12 +1599,13 @@ public partial class MainWindow : Window
                     if (!ed) return;
                     ed.addEventListener('scroll', function() {
                         if (window.__progScroll) return;
-                        clearTimeout(window._est);
-                        window._est = setTimeout(function() {
+                        if (window.__edRaf) return;
+                        window.__edRaf = requestAnimationFrame(function() {
+                            window.__edRaf = 0;
                             if (window.__progScroll) return;
                             var p = ed.scrollHeight > ed.clientHeight ? ed.scrollTop / (ed.scrollHeight - ed.clientHeight) : 0;
                             try { window.chrome.webview.postMessage('s:' + p); } catch(e) {}
-                        }, 50);
+                        });
                     });
                 });
             ");
@@ -1877,7 +1984,7 @@ public partial class MainWindow : Window
         ApplySidebarBtnPosition();
         var pos = e.GetPosition(SidebarFloatLayer);
         _dragMouseOffX = pos.X - _btnOffX;
-        _dragMouseOffY = pos.Y - ((SidebarFloatLayer.ActualHeight - SidebarFloatBtn.Height) / 2 + _btnOffY);
+        _dragMouseOffY = pos.Y - ((SidebarFloatLayer!.ActualHeight - SidebarFloatBtn!.Height) / 2 + _btnOffY);
         _dragCheckX = pos.X;
         _dragCheckY = pos.Y;
         SidebarFloatBtn.CaptureMouse();
@@ -1894,7 +2001,7 @@ public partial class MainWindow : Window
             _btnDragging = true;
         if (!_btnDragging) return;
 
-        var maxX = Math.Max(0, SidebarFloatLayer.ActualWidth - SidebarFloatBtn.Width);
+        var maxX = Math.Max(0, SidebarFloatLayer!.ActualWidth - SidebarFloatBtn!.Width);
         var maxY = Math.Max(0, SidebarFloatLayer.ActualHeight - SidebarFloatBtn.Height);
         var newX = Math.Max(0, Math.Min(maxX, pos.X - _dragMouseOffX));
         var newY = Math.Max(0, Math.Min(maxY, pos.Y - _dragMouseOffY));
@@ -1908,7 +2015,7 @@ public partial class MainWindow : Window
 
     private void SidebarFloatBtn_MouseUp(object? sender, System.Windows.Input.MouseButtonEventArgs? e)
     {
-        SidebarFloatBtn.ReleaseMouseCapture();
+        SidebarFloatBtn!.ReleaseMouseCapture();
         if (!_btnDragging)
         {
             ToggleSidebar();
@@ -1935,7 +2042,7 @@ public partial class MainWindow : Window
 
     private void SnapSidebarBtnToEdge()
     {
-        var maxX = Math.Max(0, SidebarFloatLayer.ActualWidth - SidebarFloatBtn.Width);
+        var maxX = Math.Max(0, SidebarFloatLayer!.ActualWidth - SidebarFloatBtn!.Width);
         if (_sidebarOpen)
         {
             _btnOffX = 0;
@@ -1961,7 +2068,7 @@ public partial class MainWindow : Window
             ColSidebarPanel.Width = new GridLength(220);
             ColSidebarSplitter.Width = new GridLength(4);
             SidebarSplitter.IsEnabled = true;
-            SidebarFloatIcon.Text = "✕";
+            SidebarFloatIcon!.Text = "✕";
             _sidebarBtnPinnedLeft = true;
             _sidebarBtnHoverExpanded = true;
             _sidebarBtnAutoHideEnabled = false;
@@ -1977,7 +2084,7 @@ public partial class MainWindow : Window
             ColSidebarPanel.Width = new GridLength(0);
             ColSidebarSplitter.Width = new GridLength(0);
             SidebarSplitter.IsEnabled = false;
-            SidebarFloatIcon.Text = "☰";
+            SidebarFloatIcon!.Text = "☰";
             _sidebarBtnPinnedLeft = true;
             _sidebarBtnHoverExpanded = false;
             _sidebarBtnAutoHideEnabled = true;
@@ -2078,7 +2185,7 @@ public partial class MainWindow : Window
 
             item.MouseEnter += (_, _) => item.Background = hoverBrush;
             item.MouseLeave += (_, _) => item.Background = Brushes.Transparent;
-            item.MouseDown += (_, _) => ScrollToHeading(heading);
+            item.MouseDown += (_, _) => ScrollToHeadingExact(heading);
 
             OutlinePanel.Children.Add(item);
         }
@@ -2150,6 +2257,39 @@ public partial class MainWindow : Window
                     + $"var t=document.getElementById('h{heading.Index}');"
                     + $"if(t){{var r=t.getBoundingClientRect();"
                     + $"window.scrollTo(0,Math.max(0,window.scrollY+r.top-20));}}"
+                    + $"setTimeout(function(){{window.__progScroll=false;}},500);"
+                    + $"}})()");
+            }
+        }
+        finally
+        {
+            await Task.Delay(600);
+            _suppressScrollRef--;
+        }
+    }
+
+    private async void ScrollToHeadingExact(OutlineHeading heading)
+    {
+        if (heading.LineIndex < 0) return;
+
+        _lastProgrammaticScrollTicks = DateTime.Now.Ticks;
+        _suppressScrollRef++;
+        try
+        {
+            if (EditorWebView?.CoreWebView2 != null)
+            {
+                await EditorWebView.CoreWebView2.ExecuteScriptAsync(
+                    $"(function(){{if(typeof window.scrollEditorToLine==='function'){{window.scrollEditorToLine({heading.LineIndex});}}}})()");
+            }
+
+            if (PreviewWebView?.CoreWebView2 != null)
+            {
+                await PreviewWebView.CoreWebView2.ExecuteScriptAsync(
+                    $"(function(){{"
+                    + $"window.__progScroll=true;"
+                    + $"var t=document.getElementById('h{heading.Index}');"
+                    + $"if(t){{var r=t.getBoundingClientRect();"
+                    + $"window.scrollTo(0,Math.max(0,window.scrollY+r.top));}}"
                     + $"setTimeout(function(){{window.__progScroll=false;}},500);"
                     + $"}})()");
             }
@@ -2457,6 +2597,7 @@ public partial class MainWindow : Window
         if (ThemeSelector.SelectedItem is not ComboBoxItem item) return;
 
         var themeId = item.Tag as string;
+        if (themeId == null) return;
         ApplyTheme(themeId);
     }
 
@@ -2835,7 +2976,7 @@ public partial class MainWindow : Window
             ("保存 (Ctrl+S)", (Action)(() => ApplicationCommands.Save.Execute(null, this)), false),
             ("另存为 (Ctrl+Shift+S)", (Action)(() => ApplicationCommands.SaveAs.Execute(null, this)), false),
             ("-", null, false),
-            ("最近打开的文件", (Action)(() => BtnRecent_Click(null, null!)), false),
+            ("最近打开的文件", (Action)(() => BtnRecent_Click(null!, null!)), false),
         });
     }
 
@@ -2852,12 +2993,12 @@ public partial class MainWindow : Window
     {
         ShowMenuPopup((Button)sender, new()
         {
-            ("链接", (Action)(() => FormatLink(null, null!)), false),
-            ("图片", (Action)(() => FormatImage(null, null!)), false),
-            ("表格", (Action)(() => FormatTable(null, null!)), false),
+            ("链接", (Action)(() => FormatLink(null!, null!)), false),
+            ("图片", (Action)(() => FormatImage(null!, null!)), false),
+            ("表格", (Action)(() => FormatTable(null!, null!)), false),
             ("-", null, false),
-            ("代码块", (Action)(() => FormatCode(null, null!)), false),
-            ("引用", (Action)(() => FormatQuote(null, null!)), false),
+            ("代码块", (Action)(() => FormatCode(null!, null!)), false),
+            ("引用", (Action)(() => FormatQuote(null!, null!)), false),
         });
     }
 
@@ -2865,9 +3006,9 @@ public partial class MainWindow : Window
     {
         ShowMenuPopup((Button)sender, new()
         {
-            ("粗体 (Ctrl+B)", (Action)(() => FormatBold(null, null!)), false),
-            ("斜体 (Ctrl+I)", (Action)(() => FormatItalic(null, null!)), false),
-            ("删除线", (Action)(() => FormatStrike(null, null!)), false),
+            ("粗体 (Ctrl+B)", (Action)(() => FormatBold(null!, null!)), false),
+            ("斜体 (Ctrl+I)", (Action)(() => FormatItalic(null!, null!)), false),
+            ("删除线", (Action)(() => FormatStrike(null!, null!)), false),
             ("-", null, false),
             ("标题 1", (Action)(() => ExecJs("window.insertAtLineStart('# ')")), false),
             ("标题 2", (Action)(() => ExecJs("window.insertAtLineStart('## ')")), false),
@@ -2876,8 +3017,8 @@ public partial class MainWindow : Window
             ("标题 5", (Action)(() => ExecJs("window.insertAtLineStart('##### ')")), false),
             ("标题 6", (Action)(() => ExecJs("window.insertAtLineStart('###### ')")), false),
             ("-", null, false),
-            ("无序列表", (Action)(() => FormatBulletList(null, null!)), false),
-            ("有序列表", (Action)(() => FormatNumberedList(null, null!)), false),
+            ("无序列表", (Action)(() => FormatBulletList(null!, null!)), false),
+            ("有序列表", (Action)(() => FormatNumberedList(null!, null!)), false),
         });
     }
 
@@ -2992,7 +3133,7 @@ public partial class MainWindow : Window
                 CommandManager.InvalidateRequerySuggested();
                 TrackFileOpen(dialog.FileName);
                 SaveLastFilePath(dialog.FileName);
-                if (_sidebarOpen && _sidebarTab == "files") Dispatcher.BeginInvoke(PopulateFileTree);
+                if (_sidebarOpen && _sidebarTab == "files") _ = Dispatcher.BeginInvoke(PopulateFileTree);
             }
             catch (Exception ex)
             {
@@ -3104,6 +3245,97 @@ public partial class MainWindow : Window
 
     private int _suppressScrollRef;
     private long _lastProgrammaticScrollTicks;
+    private double? _pendingPreviewToEditorPct;
+    private bool _isPreviewToEditorSyncRunning;
+    private double? _pendingEditorToPreviewPct;
+    private bool _isEditorToPreviewSyncRunning;
+
+    private void QueuePreviewToEditorScrollSync(double pct)
+    {
+        _pendingPreviewToEditorPct = pct;
+        if (_isPreviewToEditorSyncRunning) return;
+        _ = DrainPreviewToEditorScrollSyncAsync();
+    }
+
+    private async Task DrainPreviewToEditorScrollSyncAsync()
+    {
+        if (_isPreviewToEditorSyncRunning) return;
+        _isPreviewToEditorSyncRunning = true;
+        try
+        {
+            while (_pendingPreviewToEditorPct.HasValue)
+            {
+                var pct = _pendingPreviewToEditorPct.Value;
+                _pendingPreviewToEditorPct = null;
+
+                if ((DateTime.Now.Ticks - _lastProgrammaticScrollTicks) / TimeSpan.TicksPerMillisecond < 1200)
+                    continue;
+
+                while (_suppressScrollRef > 0)
+                    await Task.Delay(16);
+
+                _suppressScrollRef++;
+                try
+                {
+                    _ = EditorWebView.CoreWebView2?.ExecuteScriptAsync(
+                        $"window.__progScroll=true;var e=document.getElementById('editor');if(e)e.scrollTop=(e.scrollHeight-e.clientHeight)*{pct.ToString("F4", System.Globalization.CultureInfo.InvariantCulture)};setTimeout(function(){{window.__progScroll=false;}},80);");
+                    await Task.Delay(100);
+                }
+                finally { _suppressScrollRef--; }
+            }
+        }
+        finally
+        {
+            _isPreviewToEditorSyncRunning = false;
+            if (_pendingPreviewToEditorPct.HasValue)
+                _ = DrainPreviewToEditorScrollSyncAsync();
+        }
+    }
+
+    private void QueueEditorToPreviewScrollSync(double pct)
+    {
+        _pendingEditorToPreviewPct = pct;
+        if (_isEditorToPreviewSyncRunning) return;
+        _ = DrainEditorToPreviewScrollSyncAsync();
+    }
+
+    private async Task DrainEditorToPreviewScrollSyncAsync()
+    {
+        if (_isEditorToPreviewSyncRunning) return;
+        _isEditorToPreviewSyncRunning = true;
+        try
+        {
+            while (_pendingEditorToPreviewPct.HasValue)
+            {
+                var pct = _pendingEditorToPreviewPct.Value;
+                _pendingEditorToPreviewPct = null;
+
+                if (_currentViewMode != ViewMode.Split)
+                    continue;
+
+                if ((DateTime.Now.Ticks - _lastProgrammaticScrollTicks) / TimeSpan.TicksPerMillisecond < 1200)
+                    continue;
+
+                while (_suppressScrollRef > 0)
+                    await Task.Delay(16);
+
+                _suppressScrollRef++;
+                try
+                {
+                    _ = PreviewWebView.CoreWebView2?.ExecuteScriptAsync(
+                        $"window.__progScroll=true;window.scrollTo(0,(document.documentElement.scrollHeight-document.documentElement.clientHeight)*{pct.ToString("F4", System.Globalization.CultureInfo.InvariantCulture)});setTimeout(function(){{window.__progScroll=false;}},80);");
+                    await Task.Delay(100);
+                }
+                finally { _suppressScrollRef--; }
+            }
+        }
+        finally
+        {
+            _isEditorToPreviewSyncRunning = false;
+            if (_pendingEditorToPreviewPct.HasValue)
+                _ = DrainEditorToPreviewScrollSyncAsync();
+        }
+    }
 
     #endregion
 
