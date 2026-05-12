@@ -34,9 +34,11 @@ Most Markdown editors are either bloated IDEs, subscription-based web apps, or t
 
 ### Screenshots
 
-| Light Theme | Dark Theme |
-|------------|------------|
-| ![Light Theme](img/001.png) | ![Dark Theme](img/002.png) |
+| 简约白 (Simple White) | 薄荷绿 (Mint Green) |
+|-----------------------|---------------------|
+| ![简约白](img/001.png) | ![薄荷绿](img/002.png) |
+
+QMark comes with **12 beautiful themes** including 深邃黑, 护眼黄, 极光蓝, 暗夜紫, 樱花粉, 月白, 酷冰蓝, 拿铁棕, 复古绿, and more.
 
 ### Prerequisites
 
@@ -114,9 +116,11 @@ To register `.md` file association so you can double-click Markdown files to ope
 
 ### 截图
 
-| 浅色主题 | 深色主题 |
-|----------|----------|
-| ![浅色主题](img/001.png) | ![深色主题](img/002.png) |
+| 简约白 | 薄荷绿 |
+|--------|--------|
+| ![简约白](img/001.png) | ![薄荷绿](img/002.png) |
+
+QMark 内置 **12 套精美主题**，包括 深邃黑、护眼黄、极光蓝、暗夜紫、樱花粉、月白、酷冰蓝、拿铁棕、复古绿 等。
 
 ### 前置依赖
 
